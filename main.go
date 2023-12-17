@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	"golang.org/x/exp/slog"
@@ -22,9 +25,9 @@ var (
 )
 
 type PatchOperation struct {
-	Op    string `json:"op"`
-	Path  string `json:"path"`
-	Value int32  `json:"value"`
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
 }
 
 func main() {
@@ -32,6 +35,24 @@ func main() {
 	flag.StringVar(&tlsKey, "tls-key", "/etc/webhook/certs/tls.key", "Private key for TLS")
 	flag.StringVar(&tlsCert, "tls-crt", "/etc/webhook/certs/tls.crt", "TLS certificate")
 	flag.Parse()
+	slog.Info("loading certs..")
+	certs, err := tls.LoadX509KeyPair(tlsCert, tlsKey)
+	if err != nil {
+		slog.Error("unable to load certs", err)
+	}
+
+	http.HandleFunc("/mutate", mutate)
+
+	server := http.Server{
+		Addr: fmt.Sprintf(":%d", port),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{certs},
+		},
+	}
+
+	if err := server.ListenAndServeTLS("", ""); err != nil {
+		log.Panic(err)
+	}
 
 }
 
@@ -68,6 +89,7 @@ func mutate(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err)
 		return
 	}
+	var patches []PatchOperation
 
 	patch := PatchOperation{
 		Op:    "replace",
@@ -75,23 +97,27 @@ func mutate(w http.ResponseWriter, r *http.Request) {
 		Value: 3,
 	}
 
-	patchBytes, err := json.Marshal(patch)
+	patches = append(patches, patch)
+
+	patchBytes, err := json.Marshal(patches)
 	if err != nil {
 		err := errors.New("unable to marshal patch into bytes")
 		httpError(w, err)
 		return
 	}
+	admissionResponse := &admissionv1.AdmissionResponse{}
+	patchType := admissionv1.PatchTypeJSONPatch
+	admissionResponse.Allowed = true
+	admissionResponse.PatchType = &patchType
+	admissionResponse.Patch = patchBytes
 
-	admissionResponse := &admissionv1.AdmissionReview{
-		Response: &admissionv1.AdmissionResponse{
-			UID:     admissionReviewRequest.Request.UID,
-			Allowed: true,
-		},
-	}
+	var admissionReviewResponse admissionv1.AdmissionReview
+	admissionReviewResponse.Response = admissionResponse
 
-	admissionResponse.Response.Patch = patchBytes
+	admissionReviewResponse.SetGroupVersionKind(admissionReviewRequest.GroupVersionKind())
+	admissionReviewResponse.Response.UID = admissionReviewRequest.Request.UID
 
-	responseBytes, err := json.Marshal(&admissionResponse)
+	responseBytes, err := json.Marshal(admissionReviewResponse)
 	if err != nil {
 		err := errors.New("unable to marshal patch response  into bytes")
 		httpError(w, err)
