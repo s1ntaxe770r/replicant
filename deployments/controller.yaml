@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: mutating-replicant
+  name: mutating-replicant 
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mutating-replicant
+  template:
+    metadata:
+      labels:
+        app: mutating-replicant
+    spec:
+      containers:
+        - image: ttl.sh/mutating-replicant:1h 
+          name: mutating-replicant 
+          imagePullPolicy: Always
+          args:
+            - --port=9093
+            - --tls-crt=/etc/webhook/certs/tls.crt
+            - --tls-key=/etc/webhook/certs/tls.key
+          ports:
+            - containerPort: 9093 
+              name: webhook
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /etc/webhook/certs
+              name: certs
+      volumes:
+        - name: certs
+          secret:
+            secretName: root-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mutating-replicant 
+  namespace: default
+spec:
+  selector:
+    app: mutating-replicant 
+  type: ClusterIP
+  ports:
+  - name: mutating-replicant 
+    protocol: TCP
+    port: 443
+    targetPort: 9093
+
