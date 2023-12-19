@@ -43,6 +43,7 @@ func main() {
 
 	http.HandleFunc("/mutate", mutate)
 
+	slog.Info("successfully loaded certs. Starting server...", "port", port)
 	server := http.Server{
 		Addr: fmt.Sprintf(":%d", port),
 		TLSConfig: &tls.Config{
@@ -57,7 +58,7 @@ func main() {
 }
 
 func mutate(w http.ResponseWriter, r *http.Request) {
-	slog.Info("new mutate request")
+	slog.Info("recieved new mutate request")
 
 	scheme := runtime.NewScheme()
 	codecFactory := serializer.NewCodecFactory(scheme)
@@ -123,14 +124,16 @@ func mutate(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err)
 		return
 	}
+	slog.Info("mutation complete", "deployment mutated", deployment.ObjectMeta.Name)
 	w.Write(responseBytes)
 }
 
 func httpError(w http.ResponseWriter, err error) {
-	slog.Error("unable to complete request", err.Error())
+	slog.Error("unable to complete request", "error", err.Error())
 	w.WriteHeader(http.StatusBadRequest)
 	w.Write([]byte(err.Error()))
 }
+
 func parseAdmissionReview(req *http.Request, deserializer runtime.Decoder) (*admissionv1.AdmissionReview, error) {
 
 	reqData, err := io.ReadAll(req.Body)
@@ -146,6 +149,5 @@ func parseAdmissionReview(req *http.Request, deserializer runtime.Decoder) (*adm
 		slog.Error("unable to desdeserialize request", err)
 		return nil, err
 	}
-
 	return admissionReviewRequest, nil
 }
